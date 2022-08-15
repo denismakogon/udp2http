@@ -2,7 +2,8 @@ package main
 
 import (
 	"bytes"
-	"crypto/sha256"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net"
@@ -80,8 +81,9 @@ func (s *UDPServerConfig) sendHTTPPost(msg *[]byte) error {
 	if err != nil {
 		return err
 	}
-	hash := sha256.Sum256(*msg)
-	strHash := string(hash[:])
+	h := sha1.New()
+	h.Write(*msg)
+	strHash := hex.EncodeToString(h.Sum(nil))
 	rq.Header = http.Header{
 		"Validation":     {strHash},
 		"Content-Type":   {"application/octet-stream"},
@@ -120,6 +122,7 @@ func main() {
 		numProcessingHandlers: runtime.NumCPU(),
 		wg:                    &wg,
 		c:                     c,
+		forwardTo:             os.Args[1],
 	}
 
 	err := udpServer.listenAndReceive()
