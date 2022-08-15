@@ -16,6 +16,10 @@ jobs:
             GOOS: linux
           - GOARCH: amd64
             GOOS: darwin
+          - GOARCH: arm64
+            GOOS: darwin
+          - GOARCH: arm64
+            GOOS: linux
     steps:
       - name: 'Check out repository'
         uses: actions/checkout@v3
