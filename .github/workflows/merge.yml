@@ -1,0 +1,57 @@
+name: build and release
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v3
+        with:
+          go-version: '>=1.17.0'
+      - run: go version
+      - name: version
+        id: version
+        shell: bash
+        run: echo "::set-output name=version::$(date +'%Y.%m.%d')"
+      - name: cross-compile
+        shell: bash
+        run: |
+          mkdir target/
+          GOOS=linux GOARCH=mipsle go build -compiler gc -o target/udp2http.${{ steps.version.outputs.version }}.linux.mipsle main.go
+          GOOS=linux GOARCH=amd64 go build -compiler gc -o target/udp2http.${{ steps.version.outputs.version }}.linux.x64 main.go
+          GOOS=darwin GOARCH=amd64 go build -compiler gc -o target/udp2http.${{ steps.version.outputs.version }}.darwin.x64 main.go
+      - name: upload platform-specific JAR to artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          path: target/udp2http*
+          if-no-files-found: error
+
+  access-jars:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    steps:
+      - name: 'Check out repository'
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 1
+      - name: download JARs
+        uses: actions/download-artifact@v3
+        with:
+          path: target/bin
+      - name: version
+        id: version
+        shell: bash
+        run: echo "::set-output name=version::$(date +'%Y.%m.%d')"
+      - name: 'make release'
+        uses: marvinpinto/action-automatic-releases@latest
+        with:
+          repo_token: ${{ secrets.GH_RELEASE_TOKEN }}
+          automatic_release_tag: ${{ steps.version.outputs.version }}
+          prerelease: false
+          title: f1.java UDP server ${{ steps.version.outputs.version }}
+          files: |
+            LICENSE
+            target/bin/udp2http*
