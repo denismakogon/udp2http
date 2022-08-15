@@ -2,9 +2,11 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -28,7 +30,7 @@ type UDPServerConfig struct {
 	target                string
 }
 
-func (s *UDPServerConfig) listenAndReceive() error {
+func (s *UDPServerConfig) listenAndReceive(ctx context.Context) error {
 	c, err := net.ListenPacket("udp", fmt.Sprintf(":%d", s.port))
 	if err != nil {
 		return err
@@ -43,21 +45,23 @@ func (s *UDPServerConfig) listenAndReceive() error {
 	}()
 
 	for i := 0; i < s.numProcessingHandlers; i++ {
+		captureOfI := i
 		go func() {
+			log.Printf("starting worker[%d]...\n", captureOfI)
 			defer s.wg.Done()
-			s.receive(c)
+			s.receive(ctx, c)
 		}()
 	}
 	s.wg.Wait()
 	return nil
 }
 
-func (s *UDPServerConfig) receive(c net.PacketConn) {
+func (s *UDPServerConfig) receive(ctx context.Context, c net.PacketConn) {
 	msgArray := make([]byte, s.packetSize)
 	bufArray := make([]byte, s.packetSize)
 	var buf []byte
 
-	msg := msgArray[0:2048]
+	msg := msgArray[0:s.packetSize]
 	for {
 		nbytes, addr, err := c.ReadFrom(msg)
 		if err != nil {
@@ -66,23 +70,23 @@ func (s *UDPServerConfig) receive(c net.PacketConn) {
 		}
 		buf = bufArray[:nbytes]
 		copy(buf, msg[:nbytes])
-		go s.handleMessage(addr, &buf)
+		go s.handleMessage(ctx, addr, &buf)
 	}
 }
 
-func (s *UDPServerConfig) handleMessage(addr net.Addr, msg *[]byte) {
+func (s *UDPServerConfig) handleMessage(ctx context.Context, addr net.Addr, msg *[]byte) {
 	log.Printf("handing request from '%s'\n", addr)
-	err := s.sendHTTPPost(msg)
+	err := s.sendHTTPPost(ctx, msg)
 	if err != nil {
 		log.Println(err)
 	}
 }
 
-func (s *UDPServerConfig) sendHTTPPost(msg *[]byte) error {
+func (s *UDPServerConfig) sendHTTPPost(ctx context.Context, msg *[]byte) error {
 	client := http.Client{
 		Timeout: time.Minute,
 	}
-	rq, err := http.NewRequest("POST", s.target, bytes.NewReader(*msg))
+	rq, err := http.NewRequestWithContext(ctx, "POST", s.target, bytes.NewReader(*msg))
 	if err != nil {
 		return err
 	}
@@ -98,17 +102,18 @@ func (s *UDPServerConfig) sendHTTPPost(msg *[]byte) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("[%s] response details: status code: %d\n", strHash, resp.StatusCode)
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+	log.Printf("[%s] response details: status code: %d, headers: %s\n",
+		strHash, resp.StatusCode, resp.Header)
 	if resp.StatusCode > 202 {
-		arr := make([]byte, resp.ContentLength)
-		defer func() {
-			_ = resp.Body.Close()
-		}()
-		_, err = resp.Body.Read(arr)
+		data := make([]byte, resp.ContentLength)
+		data, err := io.ReadAll(resp.Body)
 		if err != nil {
-			arr = []byte(err.Error())
+			data = []byte(err.Error())
 		}
-		log.Printf("[%s] response body: %s", strHash, string(arr))
+		log.Printf("[%s] response body: %s\n", strHash, string(data))
 	}
 	return nil
 }
@@ -125,31 +130,40 @@ func main() {
 	}
 
 	app := &cli.App{
+		Name:  "start",
+		Usage: "UDP to HTTP traffic forwarder",
+		Action: func(c *cli.Context) error {
+			err := udpServer.listenAndReceive(c.Context)
+			if err != nil {
+				log.Fatal(err)
+			}
+			return nil
+		},
 		Flags: []cli.Flag{
 			&cli.IntFlag{
-				Name:        "port",
-				Aliases:     []string{"p"},
+				Name:        "p",
+				Aliases:     []string{"port"},
 				Usage:       "UDP socket port to start a server on",
 				Value:       20777,
 				Destination: &udpServer.port,
 			},
 			&cli.IntFlag{
-				Name:        "packet-size",
-				Aliases:     []string{"ps"},
+				Name:        "fs",
+				Aliases:     []string{"frame-size", "s"},
 				Usage:       "UDP frame size to read from socket",
 				Value:       2048,
 				Destination: &udpServer.packetSize,
 			},
 			&cli.IntFlag{
-				Name:        "workers",
-				Aliases:     []string{"w"},
+				Name:        "w",
+				Aliases:     []string{"workers"},
 				Usage:       "number of request handing workers",
 				Value:       runtime.NumCPU(),
 				Destination: &udpServer.numProcessingHandlers,
 			},
 			&cli.StringFlag{
-				Name:        "target",
-				Aliases:     []string{"t"},
+				Name:        "t",
+				Aliases:     []string{"target"},
 				Usage:       "HTTP endpoint to where forward the request",
 				Destination: &udpServer.target,
 				Required:    true,
@@ -158,11 +172,6 @@ func main() {
 	}
 
 	if err := app.Run(os.Args); err != nil {
-		log.Fatal(err)
-	}
-
-	err := udpServer.listenAndReceive()
-	if err != nil {
 		log.Fatal(err)
 	}
 }
