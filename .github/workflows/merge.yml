@@ -56,4 +56,4 @@ jobs:
           title: UDP 2 HTTP forwarder tool v${{ steps.version.outputs.version }}
           files: |
             LICENSE
-            target/bin/udp2http*
+            target/bin/artifact/udp2http*
