@@ -28,6 +28,7 @@ type UDPServerConfig struct {
 	wg                    *sync.WaitGroup
 	c                     chan os.Signal
 	target                string
+	requestTimeout        int
 }
 
 func (s *UDPServerConfig) listenAndReceive(ctx context.Context) error {
@@ -84,11 +85,11 @@ func (s *UDPServerConfig) handleMessage(ctx context.Context, addr net.Addr, msg 
 
 func (s *UDPServerConfig) sendHTTPPost(ctx context.Context, msg *[]byte) error {
 	client := http.Client{
-		Timeout: time.Minute,
+		Timeout: time.Second * time.Duration(s.requestTimeout),
 		Transport: &http.Transport{
 			Dial: (&net.Dialer{
 				Timeout:   60 * time.Second,
-				KeepAlive: 30 * time.Second,
+				KeepAlive: 10 * time.Second,
 			}).Dial,
 			TLSHandshakeTimeout: 60 * time.Second,
 		},
@@ -178,6 +179,13 @@ func main() {
 						Usage:       "HTTP endpoint to where forward the request",
 						Destination: &udpServer.target,
 						Required:    true,
+					},
+					&cli.IntFlag{
+						Name:        "rt",
+						Aliases:     []string{"request-timeout", "timeout"},
+						Usage:       "HTTP request timeout, in seconds",
+						Destination: &udpServer.requestTimeout,
+						Value:       60,
 					},
 				},
 			},
