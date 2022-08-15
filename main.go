@@ -130,45 +130,53 @@ func main() {
 	}
 
 	app := &cli.App{
-		Name:  "start",
+		Commands: []*cli.Command{
+			{
+				Name: "start",
+				Action: func(c *cli.Context) error {
+					err := udpServer.listenAndReceive(c.Context)
+					if err != nil {
+						log.Fatal(err)
+					}
+					return nil
+				},
+				Description: "starts UDP server that forwards requests to an " +
+					"HTTP endpoint defined through '-t/--target' flag",
+				UseShortOptionHandling: true,
+				Flags: []cli.Flag{
+					&cli.IntFlag{
+						Name:        "p",
+						Aliases:     []string{"port"},
+						Usage:       "UDP socket port to start a server on",
+						Value:       20777,
+						Destination: &udpServer.port,
+					},
+					&cli.IntFlag{
+						Name:        "fs",
+						Aliases:     []string{"frame-size", "s"},
+						Usage:       "UDP frame size to read from socket",
+						Value:       2048,
+						Destination: &udpServer.packetSize,
+					},
+					&cli.IntFlag{
+						Name:        "w",
+						Aliases:     []string{"workers"},
+						Usage:       "number of request handing workers",
+						Value:       runtime.NumCPU(),
+						Destination: &udpServer.numProcessingHandlers,
+					},
+					&cli.StringFlag{
+						Name:        "t",
+						Aliases:     []string{"target"},
+						Usage:       "HTTP endpoint to where forward the request",
+						Destination: &udpServer.target,
+						Required:    true,
+					},
+				},
+			},
+		},
+		Name:  "udp2http",
 		Usage: "UDP to HTTP traffic forwarder",
-		Action: func(c *cli.Context) error {
-			err := udpServer.listenAndReceive(c.Context)
-			if err != nil {
-				log.Fatal(err)
-			}
-			return nil
-		},
-		Flags: []cli.Flag{
-			&cli.IntFlag{
-				Name:        "p",
-				Aliases:     []string{"port"},
-				Usage:       "UDP socket port to start a server on",
-				Value:       20777,
-				Destination: &udpServer.port,
-			},
-			&cli.IntFlag{
-				Name:        "fs",
-				Aliases:     []string{"frame-size", "s"},
-				Usage:       "UDP frame size to read from socket",
-				Value:       2048,
-				Destination: &udpServer.packetSize,
-			},
-			&cli.IntFlag{
-				Name:        "w",
-				Aliases:     []string{"workers"},
-				Usage:       "number of request handing workers",
-				Value:       runtime.NumCPU(),
-				Destination: &udpServer.numProcessingHandlers,
-			},
-			&cli.StringFlag{
-				Name:        "t",
-				Aliases:     []string{"target"},
-				Usage:       "HTTP endpoint to where forward the request",
-				Destination: &udpServer.target,
-				Required:    true,
-			},
-		},
 	}
 
 	if err := app.Run(os.Args); err != nil {
