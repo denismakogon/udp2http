@@ -85,6 +85,13 @@ func (s *UDPServerConfig) handleMessage(ctx context.Context, addr net.Addr, msg 
 func (s *UDPServerConfig) sendHTTPPost(ctx context.Context, msg *[]byte) error {
 	client := http.Client{
 		Timeout: time.Minute,
+		Transport: &http.Transport{
+			Dial: (&net.Dialer{
+				Timeout:   60 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).Dial,
+			TLSHandshakeTimeout: 60 * time.Second,
+		},
 	}
 	rq, err := http.NewRequestWithContext(ctx, "POST", s.target, bytes.NewReader(*msg))
 	if err != nil {
