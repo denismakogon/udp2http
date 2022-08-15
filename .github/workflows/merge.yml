@@ -8,10 +8,13 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
+      - name: 'Check out repository'
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 1
       - uses: actions/setup-go@v3
         with:
           go-version: '>=1.17.0'
-      - run: go version
       - name: version
         id: version
         shell: bash
@@ -19,7 +22,6 @@ jobs:
       - name: cross-compile
         shell: bash
         run: |
-          mkdir target/
           GOOS=linux GOARCH=mipsle go build -compiler gc -o target/udp2http.${{ steps.version.outputs.version }}.linux.mipsle main.go
           GOOS=linux GOARCH=amd64 go build -compiler gc -o target/udp2http.${{ steps.version.outputs.version }}.linux.x64 main.go
           GOOS=darwin GOARCH=amd64 go build -compiler gc -o target/udp2http.${{ steps.version.outputs.version }}.darwin.x64 main.go
