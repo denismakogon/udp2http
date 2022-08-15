@@ -7,6 +7,19 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - GOARCH: mipsle
+            GOOS: linux
+          - GOARCH: amd64
+            GOOS: linux
+          - GOARCH: amd64
+            GOOS: darwin
+          - GOARCH: arm64
+            GOOS: darwin
+          - GOARCH: arm64
+            GOOS: linux
     steps:
       - name: 'Check out repository'
         uses: actions/checkout@v3
@@ -20,11 +33,11 @@ jobs:
         shell: bash
         run: echo "::set-output name=version::$(date +'%Y.%m.%d')"
       - name: cross-compile
+        env:
+          GOOS: ${{ matrix.GOOS }}
+          GOARCH: ${{ matrix.GOARCH }}
         shell: bash
-        run: |
-          GOOS=linux GOARCH=mipsle go build -compiler gc -o target/udp2http.${{ steps.version.outputs.version }}.linux.mipsle main.go
-          GOOS=linux GOARCH=amd64 go build -compiler gc -o target/udp2http.${{ steps.version.outputs.version }}.linux.x64 main.go
-          GOOS=darwin GOARCH=amd64 go build -compiler gc -o target/udp2http.${{ steps.version.outputs.version }}.darwin.x64 main.go
+        run: go build -compiler gc -o target/udp2http.${{ steps.version.outputs.version }}.$GOOS.$GOARCH main.go
       - name: upload platform-specific binaries to artifacts
         uses: actions/upload-artifact@v3
         with:
