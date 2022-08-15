@@ -51,7 +51,7 @@ jobs:
           repo_token: ${{ secrets.GH_RELEASE_TOKEN }}
           automatic_release_tag: ${{ steps.version.outputs.version }}
           prerelease: false
-          title: f1.java UDP server ${{ steps.version.outputs.version }}
+          title: UDP 2 HTTP forwarder tool v${{ steps.version.outputs.version }}
           files: |
             LICENSE
             target/bin/udp2http*
