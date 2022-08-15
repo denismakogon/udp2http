@@ -14,6 +14,9 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
+	"time"
+
+	"github.com/urfave/cli/v2"
 )
 
 type UDPServerConfig struct {
@@ -22,7 +25,7 @@ type UDPServerConfig struct {
 	numProcessingHandlers int
 	wg                    *sync.WaitGroup
 	c                     chan os.Signal
-	forwardTo             string
+	target                string
 }
 
 func (s *UDPServerConfig) listenAndReceive() error {
@@ -30,12 +33,12 @@ func (s *UDPServerConfig) listenAndReceive() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("Starting UDP server at localhost:%d...\n", s.port)
+	log.Printf("Starting UDP server at localhost:%d...\n", s.port)
 	s.wg.Add(s.numProcessingHandlers)
 	go func() {
 		<-s.c
-		fmt.Println("Done, exiting...")
-		c.Close()
+		log.Println("Done, exiting...")
+		_ = c.Close()
 		os.Exit(0)
 	}()
 
@@ -58,7 +61,7 @@ func (s *UDPServerConfig) receive(c net.PacketConn) {
 	for {
 		nbytes, addr, err := c.ReadFrom(msg)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
+			_, _ = fmt.Fprintln(os.Stderr, err)
 			continue
 		}
 		buf = bufArray[:nbytes]
@@ -68,7 +71,7 @@ func (s *UDPServerConfig) receive(c net.PacketConn) {
 }
 
 func (s *UDPServerConfig) handleMessage(addr net.Addr, msg *[]byte) {
-	fmt.Println(len(*msg))
+	log.Printf("handing request from '%s'\n", addr)
 	err := s.sendHTTPPost(msg)
 	if err != nil {
 		log.Println(err)
@@ -76,8 +79,10 @@ func (s *UDPServerConfig) handleMessage(addr net.Addr, msg *[]byte) {
 }
 
 func (s *UDPServerConfig) sendHTTPPost(msg *[]byte) error {
-	client := http.Client{}
-	rq, err := http.NewRequest("POST", s.forwardTo, bytes.NewReader(*msg))
+	client := http.Client{
+		Timeout: time.Minute,
+	}
+	rq, err := http.NewRequest("POST", s.target, bytes.NewReader(*msg))
 	if err != nil {
 		return err
 	}
@@ -96,7 +101,9 @@ func (s *UDPServerConfig) sendHTTPPost(msg *[]byte) error {
 	log.Printf("[%s] response details: status code: %d\n", strHash, resp.StatusCode)
 	if resp.StatusCode > 202 {
 		arr := make([]byte, resp.ContentLength)
-		defer resp.Body.Close()
+		defer func() {
+			_ = resp.Body.Close()
+		}()
 		_, err = resp.Body.Read(arr)
 		if err != nil {
 			arr = []byte(err.Error())
@@ -107,27 +114,55 @@ func (s *UDPServerConfig) sendHTTPPost(msg *[]byte) error {
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		log.Fatalln("Missing required parameter!\nUsage:\n\tudp2http [HTTP endpoint]")
-	}
-
 	var wg sync.WaitGroup
 	c := make(chan os.Signal)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGINT,
 		syscall.SIGABRT, syscall.SIGHUP, syscall.SIGSTOP)
 
 	udpServer := UDPServerConfig{
-		port:                  20777,
-		packetSize:            2048,
-		numProcessingHandlers: runtime.NumCPU(),
-		wg:                    &wg,
-		c:                     c,
-		forwardTo:             os.Args[1],
+		wg: &wg,
+		c:  c,
+	}
+
+	app := &cli.App{
+		Flags: []cli.Flag{
+			&cli.IntFlag{
+				Name:        "port",
+				Aliases:     []string{"p"},
+				Usage:       "UDP socket port to start a server on",
+				Value:       20777,
+				Destination: &udpServer.port,
+			},
+			&cli.IntFlag{
+				Name:        "packet-size",
+				Aliases:     []string{"ps"},
+				Usage:       "UDP frame size to read from socket",
+				Value:       2048,
+				Destination: &udpServer.packetSize,
+			},
+			&cli.IntFlag{
+				Name:        "workers",
+				Aliases:     []string{"w"},
+				Usage:       "number of request handing workers",
+				Value:       runtime.NumCPU(),
+				Destination: &udpServer.numProcessingHandlers,
+			},
+			&cli.StringFlag{
+				Name:        "target",
+				Aliases:     []string{"t"},
+				Usage:       "HTTP endpoint to where forward the request",
+				Destination: &udpServer.target,
+				Required:    true,
+			},
+		},
+	}
+
+	if err := app.Run(os.Args); err != nil {
+		log.Fatal(err)
 	}
 
 	err := udpServer.listenAndReceive()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
 }
