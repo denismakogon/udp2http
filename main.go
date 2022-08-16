@@ -28,6 +28,8 @@ type UDPServerConfig struct {
 	wg                    *sync.WaitGroup
 	c                     chan os.Signal
 	target                string
+	requestTimeout        int
+	client                *http.Client
 }
 
 func (s *UDPServerConfig) listenAndReceive(ctx context.Context) error {
@@ -83,16 +85,6 @@ func (s *UDPServerConfig) handleMessage(ctx context.Context, addr net.Addr, msg 
 }
 
 func (s *UDPServerConfig) sendHTTPPost(ctx context.Context, msg *[]byte) error {
-	client := http.Client{
-		Timeout: time.Minute,
-		Transport: &http.Transport{
-			Dial: (&net.Dialer{
-				Timeout:   60 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).Dial,
-			TLSHandshakeTimeout: 60 * time.Second,
-		},
-	}
 	rq, err := http.NewRequestWithContext(ctx, "POST", s.target, bytes.NewReader(*msg))
 	if err != nil {
 		return err
@@ -105,7 +97,7 @@ func (s *UDPServerConfig) sendHTTPPost(ctx context.Context, msg *[]byte) error {
 		"Content-Type":   {"application/octet-stream"},
 		"Content-Length": {strconv.Itoa(len(*msg))},
 	}
-	resp, err := client.Do(rq)
+	resp, err := s.client.Do(rq)
 	if err != nil {
 		return err
 	}
@@ -141,6 +133,16 @@ func main() {
 			{
 				Name: "start",
 				Action: func(c *cli.Context) error {
+					udpServer.client = &http.Client{
+						Timeout: time.Second * time.Duration(udpServer.requestTimeout),
+						Transport: &http.Transport{
+							Dial: (&net.Dialer{
+								Timeout:   60 * time.Second,
+								KeepAlive: 10 * time.Second,
+							}).Dial,
+							TLSHandshakeTimeout: 60 * time.Second,
+						},
+					}
 					err := udpServer.listenAndReceive(c.Context)
 					if err != nil {
 						log.Fatal(err)
@@ -178,6 +180,13 @@ func main() {
 						Usage:       "HTTP endpoint to where forward the request",
 						Destination: &udpServer.target,
 						Required:    true,
+					},
+					&cli.IntFlag{
+						Name:        "rt",
+						Aliases:     []string{"request-timeout", "timeout"},
+						Usage:       "HTTP request timeout, in seconds",
+						Destination: &udpServer.requestTimeout,
+						Value:       60,
 					},
 				},
 			},
